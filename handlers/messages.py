@@ -1,12 +1,20 @@
 """Plain message handlers (FSM)."""
 
+from __future__ import annotations
+
+import logging
+
 from aiogram import F, Router
 from aiogram.filters import StateFilter
 from aiogram.fsm.context import FSMContext
 from aiogram.types import Message
 
 import storage
+from model_router import get_model_for_stage
+from openrouter_client import OpenRouterClient, OpenRouterError
 from states import DiagnosticStates
+
+logger = logging.getLogger(__name__)
 
 router = Router()
 
@@ -15,15 +23,64 @@ _CONTEXT_PROMPT = (
     "есть ли хронические заболевания (по желанию)."
 )
 
-_EVAL_PLACEHOLDER = (
-    "Сбор данных завершён. На следующем этапе разработки здесь будет "
-    "автоматическая оценка с помощью модели (OpenRouter)."
-)
-
 _DISCLAIMER = (
-    "Это не медицинская консультация. Обратитесь к специалисту. "
+    "\n\n⚠️ Это не медицинская консультация. Обратитесь к специалисту. "
     "При острых состояниях вызывайте скорую помощь (112 / 103)."
 )
+
+_LLM_ERROR_FALLBACK = (
+    "К сожалению, не удалось выполнить автоматическую оценку. "
+    "Рекомендуем обратиться за очной консультацией к специалисту "
+    "(психиатр / невролог по показаниям)."
+)
+
+
+async def _run_evaluation(user_id: int) -> str:
+    """Build messages from stored data and call the LLM for evaluation."""
+    root = await storage.load_root()
+    system_prompt = root.get("system_prompt", "")
+
+    record = await storage.get_user_record(user_id)
+    collected = record.get("collected_data", {})
+    history = record.get("history", [])
+
+    collected_text = (
+        f"Симптомы: {collected.get('symptoms', 'не указано')}\n"
+        f"Контекст: {collected.get('life_context', 'не указано')}"
+    )
+
+    messages: list[dict[str, str]] = []
+
+    if system_prompt:
+        messages.append({"role": "system", "content": system_prompt})
+
+    messages.append({
+        "role": "system",
+        "content": f"Собранные данные пользователя:\n{collected_text}",
+    })
+
+    for entry in history:
+        messages.append({
+            "role": entry.get("role", "user"),
+            "content": entry.get("content", ""),
+        })
+
+    messages.append({
+        "role": "user",
+        "content": (
+            "На основе собранных данных и истории диалога "
+            "дай предварительную оценку и рекомендации. "
+            "Не ставь диагноз. Укажи, к каким специалистам обратиться."
+        ),
+    })
+
+    model = get_model_for_stage("evaluation")
+    client = OpenRouterClient()
+    try:
+        response = await client.chat_completion(messages, model)
+        return client.extract_content(response)
+    finally:
+        await client.close()
 
 
 @router.message(DiagnosticStates.symptom_collection, F.text)
@@ -48,17 +105,25 @@ async def on_context(message: Message, state: FSMContext) -> None:
     text = message.text.strip()
     await storage.set_collected_field(uid, "life_context", text)
     await storage.append_history(uid, "user", text)
+
     await state.set_state(DiagnosticStates.evaluation)
-    await message.answer(_EVAL_PLACEHOLDER)
-    await storage.append_history(uid, "assistant", _EVAL_PLACEHOLDER)
+    await message.answer("⏳ Анализирую данные, подождите…")
+
+    try:
+        evaluation_text = await _run_evaluation(uid)
+    except OpenRouterError:
+        logger.exception("LLM evaluation failed for user %d", uid)
+        evaluation_text = _LLM_ERROR_FALLBACK
+    except Exception:
+        logger.exception("Unexpected error during evaluation for user %d", uid)
+        evaluation_text = _LLM_ERROR_FALLBACK
+
+    await storage.append_history(uid, "assistant", evaluation_text)
 
     await state.set_state(DiagnosticStates.recommendations)
-    rec = (
-        "По результатам первичного сбора данных рекомендуется очная консультация "
-        f"с врачом (психиатр / невролог по показаниям).\n\n{_DISCLAIMER}"
-    )
-    await message.answer(rec)
-    await storage.append_history(uid, "assistant", rec)
+    full_reply = evaluation_text + _DISCLAIMER
+    await message.answer(full_reply)
+    await storage.append_history(uid, "assistant", _DISCLAIMER.strip())
 
 
 @router.message(
@@ -74,9 +139,9 @@ async def need_text_in_collection(message: Message) -> None:
 
 @router.message(StateFilter(DiagnosticStates.evaluation))
 async def evaluation_hold(message: Message) -> None:
-    """Reserved for stage 3 (LLM); today state is usually skipped immediately."""
+    """User sends a message while LLM is working."""
     await message.answer(
-        "Подождите, идёт подготовка ответа. Если зависло — отправьте /start."
+        "Подождите, идёт анализ данных. Если зависло — отправьте /start."
     )
 
 
