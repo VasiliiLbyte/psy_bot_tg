@@ -6,6 +6,7 @@ from aiogram.fsm.context import FSMContext
 from aiogram.types import Message
 
 import storage
+from safety import BRIEF_NON_MEDICAL_NOTICE
 from states import DiagnosticStates
 
 router = Router()
@@ -24,7 +25,9 @@ async def cmd_start(message: Message, state: FSMContext) -> None:
     await storage.reset_user_session(uid)
     await state.set_state(DiagnosticStates.symptom_collection)
     await message.answer(
-        "Бот для первичной психоневрологической анкетирования.\n\n" + _START_PROMPT
+        "Бот для первичной психоневрологической анкетирования.\n\n"
+        f"{BRIEF_NON_MEDICAL_NOTICE}\n\n"
+        + _START_PROMPT
     )
 
 
@@ -34,5 +37,6 @@ async def cmd_help(message: Message) -> None:
         "Доступные команды:\n"
         "/start — начать опрос заново\n"
         "/help — эта справка\n\n"
-        "После /start бот задаст несколько вопросов по шагам."
+        "После /start бот задаст несколько вопросов по шагам.\n\n"
+        f"{BRIEF_NON_MEDICAL_NOTICE}"
     )

@@ -11,6 +11,12 @@ from aiogram.types import Message
 
 import storage
 from context_manager import build_evaluation_chat_messages
+from safety import (
+    RECOMMENDATIONS_FOOTER_DISCLAIMER,
+    check_user_message,
+    emergency_reply_for_user,
+    log_safety_incident,
+)
 from model_router import get_model_for_stage
 from openrouter_client import OpenRouterClient, OpenRouterError
 from parser import (
@@ -28,11 +34,6 @@ router = Router()
 _CONTEXT_PROMPT = (
     "Расскажите кратко о контексте: когда началось, что предшествовало, "
     "есть ли хронические заболевания (по желанию)."
-)
-
-_DISCLAIMER = (
-    "\n\n⚠️ Это не медицинская консультация. Обратитесь к специалисту. "
-    "При острых состояниях вызывайте скорую помощь (112 / 103)."
 )
 
 _LLM_ERROR_FALLBACK = (
@@ -82,6 +83,12 @@ async def on_symptoms(message: Message, state: FSMContext) -> None:
         return
     uid = message.from_user.id
     text = message.text.strip()
+    safety_result = check_user_message(text)
+    if safety_result.is_critical:
+        await log_safety_incident(uid, safety_result, text)
+        await message.answer(emergency_reply_for_user())
+        return
+
     await storage.set_collected_field(uid, "symptoms", text)
     await storage.append_history(uid, "user", text)
     await state.set_state(DiagnosticStates.context_collection)
@@ -96,6 +103,12 @@ async def on_context(message: Message, state: FSMContext) -> None:
         return
     uid = message.from_user.id
     text = message.text.strip()
+    safety_result = check_user_message(text)
+    if safety_result.is_critical:
+        await log_safety_incident(uid, safety_result, text)
+        await message.answer(emergency_reply_for_user())
+        return
+
     await storage.set_collected_field(uid, "life_context", text)
     await storage.append_history(uid, "user", text)
 
@@ -119,9 +132,11 @@ async def on_context(message: Message, state: FSMContext) -> None:
     await storage.append_history(uid, "assistant", evaluation_text)
 
     await state.set_state(DiagnosticStates.recommendations)
-    full_reply = evaluation_text + _DISCLAIMER
+    full_reply = evaluation_text + RECOMMENDATIONS_FOOTER_DISCLAIMER
     await message.answer(full_reply)
-    await storage.append_history(uid, "assistant", _DISCLAIMER.strip())
+    await storage.append_history(
+        uid, "assistant", RECOMMENDATIONS_FOOTER_DISCLAIMER.strip()
+    )
 
 
 @router.message(

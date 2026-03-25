@@ -1,6 +1,7 @@
 venv/
 .env
 data/*.lock
+data/incidents.json
 __pycache__/
 *.py[cod]
 *$py.class
