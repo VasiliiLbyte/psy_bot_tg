@@ -12,6 +12,9 @@ from typing import Any
 
 import httpx
 
+# Optional transport for tests / custom networking (e.g. httpx.MockTransport).
+AsyncTransport = httpx.AsyncBaseTransport
+
 logger = logging.getLogger(__name__)
 
 OPENROUTER_BASE_URL = "https://openrouter.ai/api/v1"
@@ -43,6 +46,7 @@ class OpenRouterClient:
         base_url: str = OPENROUTER_BASE_URL,
         timeout: float = DEFAULT_TIMEOUT,
         max_retries: int = DEFAULT_MAX_RETRIES,
+        transport: AsyncTransport | None = None,
     ) -> None:
         self._api_key = api_key or os.getenv("OPENROUTER_API_KEY", "")
         if not self._api_key:
@@ -50,19 +54,23 @@ class OpenRouterClient:
         self._base_url = base_url.rstrip("/")
         self._timeout = timeout
         self._max_retries = max_retries
+        self._transport = transport
         self._client: httpx.AsyncClient | None = None
 
     async def _get_client(self) -> httpx.AsyncClient:
         if self._client is None or self._client.is_closed:
-            self._client = httpx.AsyncClient(
-                base_url=self._base_url,
-                headers={
+            client_kw: dict[str, Any] = {
+                "base_url": self._base_url,
+                "headers": {
                     "Authorization": f"Bearer {self._api_key}",
                     "Content-Type": "application/json",
                     "HTTP-Referer": "https://github.com/VasiliiLbyte/psy_bot_tg",
                 },
-                timeout=httpx.Timeout(self._timeout),
-            )
+                "timeout": httpx.Timeout(self._timeout),
+            }
+            if self._transport is not None:
+                client_kw["transport"] = self._transport
+            self._client = httpx.AsyncClient(**client_kw)
         return self._client
 
     async def close(self) -> None:
