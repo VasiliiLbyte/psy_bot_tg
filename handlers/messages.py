@@ -12,6 +12,12 @@ from aiogram.types import Message
 import storage
 from model_router import get_model_for_stage
 from openrouter_client import OpenRouterClient, OpenRouterError
+from parser import (
+    ParseError,
+    evaluation_json_user_instruction,
+    format_report_for_user,
+    parse_diagnostic_report,
+)
 from states import DiagnosticStates
 
 logger = logging.getLogger(__name__)
@@ -68,7 +74,8 @@ async def _run_evaluation(user_id: int) -> str:
     messages.append({
         "role": "user",
         "content": (
-            "На основе собранных данных и истории диалога "
+            evaluation_json_user_instruction()
+            + "\n\nНа основе собранных данных и истории диалога "
             "дай предварительную оценку и рекомендации. "
             "Не ставь диагноз. Укажи, к каким специалистам обратиться."
         ),
@@ -78,7 +85,9 @@ async def _run_evaluation(user_id: int) -> str:
     client = OpenRouterClient()
     try:
         response = await client.chat_completion(messages, model)
-        return client.extract_content(response)
+        raw = client.extract_content(response)
+        report = parse_diagnostic_report(raw)
+        return format_report_for_user(report)
     finally:
         await client.close()
 
@@ -113,6 +122,11 @@ async def on_context(message: Message, state: FSMContext) -> None:
         evaluation_text = await _run_evaluation(uid)
     except OpenRouterError:
         logger.exception("LLM evaluation failed for user %d", uid)
+        evaluation_text = _LLM_ERROR_FALLBACK
+    except ParseError as exc:
+        logger.warning(
+            "Failed to parse diagnostic JSON for user %d: %s", uid, exc
+        )
         evaluation_text = _LLM_ERROR_FALLBACK
     except Exception:
         logger.exception("Unexpected error during evaluation for user %d", uid)
