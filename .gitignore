@@ -1,5 +1,6 @@
 venv/
 .env
+data/*.lock
 __pycache__/
 *.py[cod]
 *$py.class

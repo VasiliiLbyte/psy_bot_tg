@@ -7,6 +7,7 @@ import sys
 
 from aiogram import Bot, Dispatcher
 from aiogram.client.session.aiohttp import AiohttpSession
+from aiogram.fsm.storage.memory import MemoryStorage
 from dotenv import load_dotenv
 
 from handlers import commands_router, messages_router
@@ -36,7 +37,7 @@ async def run_bot() -> None:
     else:
         bot = Bot(token=token)
 
-    dp = Dispatcher()
+    dp = Dispatcher(storage=MemoryStorage())
     dp.include_router(commands_router)
     dp.include_router(messages_router)
 
