@@ -10,6 +10,7 @@ from aiogram.fsm.context import FSMContext
 from aiogram.types import Message
 
 import storage
+from context_manager import build_evaluation_chat_messages
 from model_router import get_model_for_stage
 from openrouter_client import OpenRouterClient, OpenRouterError
 from parser import (
@@ -42,7 +43,7 @@ _LLM_ERROR_FALLBACK = (
 
 
 async def _run_evaluation(user_id: int) -> str:
-    """Build messages from stored data and call the LLM for evaluation."""
+    """Load user data from storage, assemble context via context_manager, call LLM."""
     root = await storage.load_root()
     system_prompt = root.get("system_prompt", "")
 
@@ -50,36 +51,19 @@ async def _run_evaluation(user_id: int) -> str:
     collected = record.get("collected_data", {})
     history = record.get("history", [])
 
-    collected_text = (
-        f"Симптомы: {collected.get('symptoms', 'не указано')}\n"
-        f"Контекст: {collected.get('life_context', 'не указано')}"
+    current_user_content = (
+        evaluation_json_user_instruction()
+        + "\n\nНа основе собранных данных и истории диалога "
+        "дай предварительную оценку и рекомендации. "
+        "Не ставь диагноз. Укажи, к каким специалистам обратиться."
     )
 
-    messages: list[dict[str, str]] = []
-
-    if system_prompt:
-        messages.append({"role": "system", "content": system_prompt})
-
-    messages.append({
-        "role": "system",
-        "content": f"Собранные данные пользователя:\n{collected_text}",
-    })
-
-    for entry in history:
-        messages.append({
-            "role": entry.get("role", "user"),
-            "content": entry.get("content", ""),
-        })
-
-    messages.append({
-        "role": "user",
-        "content": (
-            evaluation_json_user_instruction()
-            + "\n\nНа основе собранных данных и истории диалога "
-            "дай предварительную оценку и рекомендации. "
-            "Не ставь диагноз. Укажи, к каким специалистам обратиться."
-        ),
-    })
+    messages = build_evaluation_chat_messages(
+        system_prompt=system_prompt if isinstance(system_prompt, str) else "",
+        collected_data=collected if isinstance(collected, dict) else {},
+        history=history if isinstance(history, list) else [],
+        current_user_content=current_user_content,
+    )
 
     model = get_model_for_stage("evaluation")
     client = OpenRouterClient()
