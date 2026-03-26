@@ -1,6 +1,7 @@
 venv/
 .env
 data/*.lock
+data/bot.db
 data/incidents.json
 __pycache__/
 *.py[cod]

@@ -83,8 +83,8 @@ class OpenRouterClient:
         messages: list[dict[str, str]],
         model: str,
         *,
-        temperature: float = 0.4,
-        max_tokens: int | None = None,
+        temperature: float = 0.72,
+        max_tokens: int | None = 2048,
     ) -> dict[str, Any]:
         """Send a chat completion request and return the parsed JSON response.
 

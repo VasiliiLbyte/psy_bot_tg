@@ -3,7 +3,7 @@
 from aiogram import Router
 from aiogram.filters import Command
 from aiogram.fsm.context import FSMContext
-from aiogram.types import Message
+from aiogram.types import Message, ReplyKeyboardRemove
 
 import storage
 from safety import BRIEF_NON_MEDICAL_NOTICE
@@ -27,7 +27,8 @@ async def cmd_start(message: Message, state: FSMContext) -> None:
     await message.answer(
         "Бот для первичной психоневрологической анкетирования.\n\n"
         f"{BRIEF_NON_MEDICAL_NOTICE}\n\n"
-        + _START_PROMPT
+        + _START_PROMPT,
+        reply_markup=ReplyKeyboardRemove(),
     )
 
 
