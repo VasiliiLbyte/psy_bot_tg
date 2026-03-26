@@ -5,5 +5,6 @@ pydantic>=2.9,<3
 tiktoken>=0.8,<1
 python-dotenv>=1.0,<2
 filelock>=3.16,<4
+aiosqlite>=0.21,<1
 pytest>=8.3,<10
 pytest-asyncio>=0.25,<1

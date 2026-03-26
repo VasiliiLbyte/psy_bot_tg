@@ -1,8 +1,7 @@
-"""Tests for JSON storage and history trimming."""
+"""Tests for storage facade (SQLite-backed)."""
 
 from __future__ import annotations
 
-import json
 from pathlib import Path
 
 import pytest
@@ -60,12 +59,7 @@ async def test_reset_user_session_clears_user(isolated_storage: Path) -> None:
 async def test_save_root_persists(isolated_storage: Path) -> None:
     root = await storage.load_root()
     root["system_prompt"] = "SYS"
-    root.setdefault("users", {})["1"] = {
-        "collected_data": {"symptoms": "", "life_context": ""},
-        "history": [],
-    }
     await storage.save_root(root)
 
-    raw = json.loads(isolated_storage.read_text(encoding="utf-8"))
-    assert raw["system_prompt"] == "SYS"
-    assert "1" in raw["users"]
+    root2 = await storage.load_root()
+    assert root2["system_prompt"] == "SYS"

@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import asyncio
+import contextlib
 import logging
 
 from aiogram import F, Router
@@ -11,6 +13,7 @@ from aiogram.types import Message
 
 import storage
 from context_manager import build_evaluation_chat_messages
+from handlers.callbacks import recommendations_actions_keyboard
 from safety import (
     RECOMMENDATIONS_FOOTER_DISCLAIMER,
     check_user_message,
@@ -26,6 +29,7 @@ from parser import (
     parse_diagnostic_report,
 )
 from states import DiagnosticStates
+from utils_tg import keep_typing
 
 logger = logging.getLogger(__name__)
 
@@ -43,7 +47,7 @@ _LLM_ERROR_FALLBACK = (
 )
 
 
-async def _run_evaluation(user_id: int) -> str:
+async def _run_evaluation(openrouter_client: OpenRouterClient, user_id: int) -> str:
     """Load user data from storage, assemble context via context_manager, call LLM."""
     root = await storage.load_root()
     system_prompt = root.get("system_prompt", "")
@@ -67,14 +71,10 @@ async def _run_evaluation(user_id: int) -> str:
     )
 
     model = get_model_for_stage("evaluation")
-    client = OpenRouterClient()
-    try:
-        response = await client.chat_completion(messages, model)
-        raw = client.extract_content(response)
-        report = parse_diagnostic_report(raw)
-        return format_report_for_user(report)
-    finally:
-        await client.close()
+    response = await openrouter_client.chat_completion(messages, model)
+    raw = openrouter_client.extract_content(response)
+    report = parse_diagnostic_report(raw)
+    return format_report_for_user(report)
 
 
 @router.message(DiagnosticStates.symptom_collection, F.text)
@@ -98,7 +98,11 @@ async def on_symptoms(message: Message, state: FSMContext) -> None:
 
 
 @router.message(DiagnosticStates.context_collection, F.text)
-async def on_context(message: Message, state: FSMContext) -> None:
+async def on_context(
+    message: Message,
+    state: FSMContext,
+    openrouter_client: OpenRouterClient,
+) -> None:
     if message.from_user is None:
         return
     uid = message.from_user.id
@@ -113,10 +117,13 @@ async def on_context(message: Message, state: FSMContext) -> None:
     await storage.append_history(uid, "user", text)
 
     await state.set_state(DiagnosticStates.evaluation)
-    await message.answer("⏳ Анализирую данные, подождите…")
+    typing_task = asyncio.create_task(
+        keep_typing(message.bot, message.chat.id),
+        name=f"keep_typing:{message.chat.id}",
+    )
 
     try:
-        evaluation_text = await _run_evaluation(uid)
+        evaluation_text = await _run_evaluation(openrouter_client, uid)
     except OpenRouterError:
         logger.exception("LLM evaluation failed for user %d", uid)
         evaluation_text = _LLM_ERROR_FALLBACK
@@ -128,15 +135,80 @@ async def on_context(message: Message, state: FSMContext) -> None:
     except Exception:
         logger.exception("Unexpected error during evaluation for user %d", uid)
         evaluation_text = _LLM_ERROR_FALLBACK
+    finally:
+        typing_task.cancel()
+        with contextlib.suppress(asyncio.CancelledError):
+            await typing_task
 
     await storage.append_history(uid, "assistant", evaluation_text)
 
     await state.set_state(DiagnosticStates.recommendations)
     full_reply = evaluation_text + RECOMMENDATIONS_FOOTER_DISCLAIMER
-    await message.answer(full_reply)
+    await message.answer(full_reply, reply_markup=recommendations_actions_keyboard())
     await storage.append_history(
         uid, "assistant", RECOMMENDATIONS_FOOTER_DISCLAIMER.strip()
     )
+
+
+@router.message(DiagnosticStates.followup, F.text)
+async def on_followup_question(
+    message: Message,
+    state: FSMContext,
+    openrouter_client: OpenRouterClient,
+) -> None:
+    if message.from_user is None:
+        return
+    uid = message.from_user.id
+    question = message.text.strip()
+
+    safety_result = check_user_message(question)
+    if safety_result.is_critical:
+        await log_safety_incident(uid, safety_result, question)
+        await message.answer(emergency_reply_for_user())
+        return
+
+    record = await storage.get_user_record(uid)
+    collected = record.get("collected_data", {})
+    history = record.get("history", [])
+    root = await storage.load_root()
+    system_prompt = root.get("system_prompt", "")
+
+    current_user_content = (
+        question
+        + "\n\nОтветь на уточняющий вопрос пользователя, учитывая собранные данные и историю диалога. "
+        "Пиши эмпатично и структурированно. Не ставь диагноз."
+    )
+
+    messages = build_evaluation_chat_messages(
+        system_prompt=system_prompt if isinstance(system_prompt, str) else "",
+        collected_data=collected if isinstance(collected, dict) else {},
+        history=history if isinstance(history, list) else [],
+        current_user_content=current_user_content,
+    )
+
+    model = get_model_for_stage("recommendations")
+
+    typing_task = asyncio.create_task(
+        keep_typing(message.bot, message.chat.id),
+        name=f"keep_typing:{message.chat.id}",
+    )
+    try:
+        response = await openrouter_client.chat_completion(messages, model)
+        answer = openrouter_client.extract_content(response).strip()
+    except OpenRouterError:
+        logger.exception("Followup LLM failed for user %d", uid)
+        answer = _LLM_ERROR_FALLBACK
+    except Exception:
+        logger.exception("Unexpected error during followup for user %d", uid)
+        answer = _LLM_ERROR_FALLBACK
+    finally:
+        typing_task.cancel()
+        with contextlib.suppress(asyncio.CancelledError):
+            await typing_task
+
+    await storage.append_history(uid, "user", question)
+    await storage.append_history(uid, "assistant", answer)
+    await message.answer(answer, reply_markup=recommendations_actions_keyboard())
 
 
 @router.message(

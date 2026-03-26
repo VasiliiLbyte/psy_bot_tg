@@ -10,7 +10,7 @@
 - pydantic (валидация данных)
 - tiktoken (подсчёт токенов)
 - python-dotenv (переменные окружения)
-- filelock (блокировки файла JSON)
+- aiosqlite (SQLite-хранилище)
 
 ## Опционально
 - pytest (тестирование)
@@ -22,5 +22,5 @@
 - OpenRouter API (универсальный доступ к LLM)
 
 ## Хранение
-- Локальный JSON (для MVP)
-- В перспективе: PostgreSQL или SQLite
+- SQLite (для MVP)
+- В перспективе: PostgreSQL

@@ -10,7 +10,9 @@ from aiogram.client.session.aiohttp import AiohttpSession
 from aiogram.fsm.storage.memory import MemoryStorage
 from dotenv import load_dotenv
 
-from handlers import commands_router, messages_router
+import db
+from handlers import callbacks_router, commands_router, messages_router
+from openrouter_client import OpenRouterClient
 from utils import normalize_telegram_proxy, telegram_proxy_is_configured
 
 logger = logging.getLogger(__name__)
@@ -26,6 +28,7 @@ def _configure_logging() -> None:
 
 async def run_bot() -> None:
     load_dotenv()
+    await db.init_db("data/bot.db")
     token = os.getenv("TELEGRAM_BOT_TOKEN", "").strip()
     if not token:
         raise RuntimeError("TELEGRAM_BOT_TOKEN is not set in environment")
@@ -47,10 +50,15 @@ async def run_bot() -> None:
         bot = Bot(token=token)
 
     dp = Dispatcher(storage=MemoryStorage())
+    dp["openrouter_client"] = OpenRouterClient()
     dp.include_router(commands_router)
+    dp.include_router(callbacks_router)
     dp.include_router(messages_router)
 
-    await dp.start_polling(bot)
+    try:
+        await dp.start_polling(bot)
+    finally:
+        await dp["openrouter_client"].close()
 
 
 def main() -> None:

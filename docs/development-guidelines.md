@@ -12,12 +12,15 @@ neuro_bot/
 ├── .env
 ├── .cursorrules
 ├── main.py
+├── db.py
 ├── handlers/
 │ ├── init.py
 │ ├── commands.py
+│ ├── callbacks.py
 │ └── messages.py
 ├── states.py
 ├── storage.py
+├── storage_json_legacy.py
 ├── context_manager.py
 ├── openrouter_client.py
 ├── model_router.py
@@ -25,8 +28,9 @@ neuro_bot/
 ├── models.py
 ├── safety.py
 ├── utils.py
+├── utils_tg.py
 ├── data/
-│ ├── data.json
+│ ├── bot.db
 │ └── incidents.json
 ├── tests/
 │ ├── test_storage.py

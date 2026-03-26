@@ -1,7 +1,7 @@
 # Архитектура проекта
 
 ## Общая схема
-Telegram -> Aiogram Bot (handlers, FSM) -> Context Manager -> OpenRouter Client -> Parser -> Storage (JSON)
+Telegram -> Aiogram Bot (handlers, FSM) -> Context Manager -> OpenRouter Client -> Parser -> Storage (SQLite)
 
 ^
 text
@@ -11,7 +11,8 @@ text
 ### 1. Telegram Bot (aiogram 3)
 - **Handlers**: обработка команд и сообщений.
 - **Middleware**: логирование, rate limiting, дисклеймеры.
-- **FSM**: состояния опроса.
+- **FSM**: состояния опроса + follow-up вопросы.
+- **UX**: во время долгих запросов к LLM отправляется `chat_action=typing` (периодически).
 
 ### 2. Context Manager
 - Загрузка истории пользователя.
@@ -21,6 +22,7 @@ text
 ### 3. OpenRouter Client
 - Выбор модели в зависимости от этапа.
 - Отправка запросов, retry, обработка ошибок.
+- Клиент создаётся один раз на уровне приложения и переиспользуется (connection pooling).
 
 ### 4. Parser
 - Извлечение JSON из ответа.
@@ -28,8 +30,8 @@ text
 - Преобразование в объект DiagnosticReport.
 
 ### 5. Storage
-- Чтение/запись data.json.
-- Блокировки (filelock).
+- SQLite (aiosqlite), атомарные операции.
+- История сообщений хранится отдельно и обрезается на уровне SQL.
 
 ### 6. Safety
 - Фильтрация критических фраз.
@@ -37,7 +39,7 @@ text
 - Добавление дисклеймера.
 
 ## Хранение данных
-- `data.json`: пользователи, диалоги, собранные данные.
+- `data/bot.db`: пользователи, история диалога, настройки (system_prompt).
 - `incidents.json`: инциденты для аудита.
 
 ## Поток обработки сообщения

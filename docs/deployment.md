@@ -8,6 +8,7 @@
 5. Создать `.env` с переменными:
    - `TELEGRAM_BOT_TOKEN`
    - `OPENROUTER_API_KEY`
+   - (опционально) `MODEL_SYMPTOM_COLLECTION`, `MODEL_EVALUATION`, `MODEL_RECOMMENDATIONS`
 6. Запустить: `python main.py`
 
 ## Docker (опционально)

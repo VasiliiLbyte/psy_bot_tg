@@ -10,3 +10,4 @@ class DiagnosticStates(StatesGroup):
     context_collection = State()
     evaluation = State()
     recommendations = State()
+    followup = State()

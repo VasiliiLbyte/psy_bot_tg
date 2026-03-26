@@ -8,21 +8,35 @@ in context-management.md.
 from __future__ import annotations
 
 import logging
+import os
 
 logger = logging.getLogger(__name__)
 
 _STAGE_MODEL_MAP: dict[str, str] = {
-    "symptom_collection": "deepseek/deepseek-r1",
-    "context_collection": "deepseek/deepseek-r1",
     "evaluation": "deepseek/deepseek-r1",
-    "recommendations": "deepseek/deepseek-r1",
+    "symptom_collection": "openai/gpt-4o-mini",
+    "context_collection": "openai/gpt-4o-mini",
+    "recommendations": "anthropic/claude-3.5-sonnet",
 }
 
 DEFAULT_MODEL = "deepseek/deepseek-r1"
 
+_ENV_OVERRIDE_BY_STAGE: dict[str, str] = {
+    "symptom_collection": "MODEL_SYMPTOM_COLLECTION",
+    "context_collection": "MODEL_SYMPTOM_COLLECTION",
+    "evaluation": "MODEL_EVALUATION",
+    "recommendations": "MODEL_RECOMMENDATIONS",
+}
+
 
 def get_model_for_stage(stage: str) -> str:
     """Return the OpenRouter model identifier for a given pipeline stage."""
+    env_key = _ENV_OVERRIDE_BY_STAGE.get(stage)
+    if env_key:
+        override = os.getenv(env_key, "").strip()
+        if override:
+            logger.debug("Stage '%s' → model '%s' (override %s)", stage, override, env_key)
+            return override
     model = _STAGE_MODEL_MAP.get(stage, DEFAULT_MODEL)
     logger.debug("Stage '%s' → model '%s'", stage, model)
     return model
