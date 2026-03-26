@@ -14,6 +14,11 @@ import aiosqlite
 MAX_HISTORY_MESSAGES = 20
 
 _db_path: Path | None = None
+_CLARIFICATION_COLUMNS: tuple[str, ...] = (
+    "clarification_questions",
+    "clarification_index",
+    "clarification_answers",
+)
 
 
 def _require_db_path() -> Path:
@@ -45,6 +50,14 @@ async def init_db(path: str) -> None:
             );
             """
         )
+        # Lightweight migration: add clarification-related columns if DB already exists.
+        # We keep them TEXT so storage can serialize JSON consistently.
+        for col in _CLARIFICATION_COLUMNS:
+            try:
+                await db.execute(f"ALTER TABLE users ADD COLUMN {col} TEXT;")
+            except Exception:
+                # Column probably already exists; ignore.
+                pass
         await db.execute(
             """
             CREATE TABLE IF NOT EXISTS history (
@@ -96,8 +109,8 @@ async def set_system_prompt(text: str) -> None:
 async def _ensure_user_row(db: aiosqlite.Connection, user_id: int) -> None:
     await db.execute(
         """
-        INSERT INTO users(user_id, symptoms, life_context)
-        VALUES(?, '', '')
+        INSERT INTO users(user_id, symptoms, life_context, clarification_questions, clarification_index, clarification_answers)
+        VALUES(?, '', '', '', '0', '')
         ON CONFLICT(user_id) DO NOTHING
         """,
         (user_id,),
@@ -111,12 +124,15 @@ async def get_user_record(user_id: int) -> dict[str, Any]:
         await _ensure_user_row(db, user_id)
 
         async with db.execute(
-            "SELECT symptoms, life_context FROM users WHERE user_id = ?",
+            "SELECT symptoms, life_context, clarification_questions, clarification_index, clarification_answers FROM users WHERE user_id = ?",
             (user_id,),
         ) as cur:
             row = await cur.fetchone()
             symptoms = str(row[0] or "") if row else ""
             life_context = str(row[1] or "") if row else ""
+            clarification_questions = str(row[2] or "") if row else ""
+            clarification_index = str(row[3] or "0") if row else "0"
+            clarification_answers = str(row[4] or "") if row else ""
 
         async with db.execute(
             """
@@ -133,13 +149,16 @@ async def get_user_record(user_id: int) -> dict[str, Any]:
             "collected_data": {
                 "symptoms": symptoms,
                 "life_context": life_context,
+                "clarification_questions": clarification_questions,
+                "clarification_index": clarification_index,
+                "clarification_answers": clarification_answers,
             },
             "history": [{"role": str(r[0]), "content": str(r[1])} for r in rows],
         }
 
 
 async def update_collected_field(user_id: int, field: str, value: str) -> None:
-    if field not in ("symptoms", "life_context"):
+    if field not in ("symptoms", "life_context", *_CLARIFICATION_COLUMNS):
         raise KeyError(f"Unknown collected field: {field}")
     path = _require_db_path()
     async with aiosqlite.connect(path.as_posix()) as db:
@@ -189,7 +208,18 @@ async def reset_user_session(user_id: int) -> None:
     async with aiosqlite.connect(path.as_posix()) as db:
         await db.execute("BEGIN IMMEDIATE;")
         await _ensure_user_row(db, user_id)
-        await db.execute("UPDATE users SET symptoms = '', life_context = '' WHERE user_id = ?", (user_id,))
+        await db.execute(
+            """
+            UPDATE users
+            SET symptoms = '',
+                life_context = '',
+                clarification_questions = '',
+                clarification_index = '0',
+                clarification_answers = ''
+            WHERE user_id = ?
+            """,
+            (user_id,),
+        )
         await db.execute("DELETE FROM history WHERE user_id = ?", (user_id,))
         await db.commit()
 

@@ -8,6 +8,7 @@ class DiagnosticStates(StatesGroup):
 
     symptom_collection = State()
     context_collection = State()
+    clarification = State()
     evaluation = State()
     recommendations = State()
     followup = State()

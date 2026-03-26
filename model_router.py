@@ -16,7 +16,8 @@ _STAGE_MODEL_MAP: dict[str, str] = {
     "evaluation": "deepseek/deepseek-r1",
     "symptom_collection": "openai/gpt-4o-mini",
     "context_collection": "openai/gpt-4o-mini",
-    "recommendations": "openai/gpt-4o",
+    "clarification": "openai/gpt-4o-mini",
+    "recommendations": "anthropic/claude-3.5-sonnet",
 }
 
 DEFAULT_MODEL = "deepseek/deepseek-r1"
@@ -24,6 +25,7 @@ DEFAULT_MODEL = "deepseek/deepseek-r1"
 _ENV_OVERRIDE_BY_STAGE: dict[str, str] = {
     "symptom_collection": "MODEL_SYMPTOM_COLLECTION",
     "context_collection": "MODEL_SYMPTOM_COLLECTION",
+    "clarification": "MODEL_CLARIFICATION",
     "evaluation": "MODEL_EVALUATION",
     "recommendations": "MODEL_RECOMMENDATIONS",
 }

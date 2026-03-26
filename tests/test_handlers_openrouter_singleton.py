@@ -47,7 +47,11 @@ async def test_openrouter_client_is_singleton_in_handler(monkeypatch: pytest.Mon
     )
     monkeypatch.setattr(messages_handlers.storage, "set_collected_field", lambda *_a, **_k: _async_noop())
     monkeypatch.setattr(messages_handlers.storage, "append_history", lambda *_a, **_k: _async_noop())
+    monkeypatch.setattr(messages_handlers.storage, "init_clarification", lambda *_a, **_k: _async_noop())
+    monkeypatch.setattr(messages_handlers.storage, "advance_clarification", lambda *_a, **_k: _async_return((1, 1)))
+    monkeypatch.setattr(messages_handlers.storage, "get_clarification_state", lambda *_a, **_k: _async_return((["Q1?"], 1, ["A1"])))
     monkeypatch.setattr(messages_handlers, "RECOMMENDATIONS_FOOTER_DISCLAIMER", "")
+    monkeypatch.setattr(messages_handlers, "_generate_clarification_questions", lambda *_a, **_k: _async_return(["Q1?"]))
 
     received_clients: list[OpenRouterClient] = []
 
@@ -61,11 +65,15 @@ async def test_openrouter_client_is_singleton_in_handler(monkeypatch: pytest.Mon
 
     msg1 = _DummyMessage(user_id=1, text="context 1")
     msg2 = _DummyMessage(user_id=1, text="context 2")
+    clar1 = _DummyMessage(user_id=1, text="answer 1")
+    clar2 = _DummyMessage(user_id=1, text="answer 2")
     state1 = _DummyState()
     state2 = _DummyState()
 
     await messages_handlers.on_context(msg1, state1, openrouter_client=client)
+    await messages_handlers.on_clarification(clar1, state1, openrouter_client=client)
     await messages_handlers.on_context(msg2, state2, openrouter_client=client)
+    await messages_handlers.on_clarification(clar2, state2, openrouter_client=client)
 
     assert len(received_clients) == 2
     assert received_clients[0] is received_clients[1] is client
@@ -77,4 +85,8 @@ async def _async_noop() -> None:
 
 async def _async_noop_kw(*_a: Any, **_k: Any) -> None:
     return None
+
+
+async def _async_return(value: Any) -> Any:
+    return value
 
