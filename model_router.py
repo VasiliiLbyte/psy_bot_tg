@@ -16,7 +16,7 @@ _STAGE_MODEL_MAP: dict[str, str] = {
     "evaluation": "deepseek/deepseek-r1",
     "symptom_collection": "openai/gpt-4o-mini",
     "context_collection": "openai/gpt-4o-mini",
-    "recommendations": "anthropic/claude-3.5-sonnet",
+    "recommendations": "openai/gpt-4o",
 }
 
 DEFAULT_MODEL = "deepseek/deepseek-r1"

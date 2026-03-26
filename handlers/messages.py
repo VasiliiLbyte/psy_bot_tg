@@ -46,6 +46,21 @@ _LLM_ERROR_FALLBACK = (
     "(психиатр / невролог по показаниям)."
 )
 
+_FOLLOWUP_SYSTEM_PROMPT_FALLBACK = (
+    "Ты - эмпатичный психологический ассистент. "
+    "Отвечай на вопросы пользователя развёрнуто и поддерживающе. "
+    "Не ставь диагнозы. Используй контекст собранных данных и историю диалога."
+)
+
+_FOLLOWUP_ERROR_FALLBACK = (
+    "Не удалось получить ответ - попробуйте переформулировать вопрос "
+    "или нажмите 🔄 Новый опрос."
+)
+
+_FOLLOWUP_POSTFIX = (
+    "\n\n💬 Можете задать ещё один вопрос или нажать кнопку ниже."
+)
+
 
 async def _run_evaluation(openrouter_client: OpenRouterClient, user_id: int) -> str:
     """Load user data from storage, assemble context via context_manager, call LLM."""
@@ -173,20 +188,23 @@ async def on_followup_question(
     root = await storage.load_root()
     system_prompt = root.get("system_prompt", "")
 
-    current_user_content = (
-        question
-        + "\n\nОтветь на уточняющий вопрос пользователя, учитывая собранные данные и историю диалога. "
-        "Пиши эмпатично и структурированно. Не ставь диагноз."
+    followup_system_prompt = (
+        system_prompt.strip()
+        if isinstance(system_prompt, str) and system_prompt.strip()
+        else _FOLLOWUP_SYSTEM_PROMPT_FALLBACK
     )
 
+    current_user_content = question
+
     messages = build_evaluation_chat_messages(
-        system_prompt=system_prompt if isinstance(system_prompt, str) else "",
+        system_prompt=followup_system_prompt,
         collected_data=collected if isinstance(collected, dict) else {},
         history=history if isinstance(history, list) else [],
         current_user_content=current_user_content,
     )
 
     model = get_model_for_stage("recommendations")
+    logger.info("Followup request: user=%d model=%s", uid, model)
 
     typing_task = asyncio.create_task(
         keep_typing(message.bot, message.chat.id),
@@ -197,14 +215,16 @@ async def on_followup_question(
         answer = openrouter_client.extract_content(response).strip()
     except OpenRouterError:
         logger.exception("Followup LLM failed for user %d", uid)
-        answer = _LLM_ERROR_FALLBACK
+        answer = _FOLLOWUP_ERROR_FALLBACK
     except Exception:
         logger.exception("Unexpected error during followup for user %d", uid)
-        answer = _LLM_ERROR_FALLBACK
+        answer = _FOLLOWUP_ERROR_FALLBACK
     finally:
         typing_task.cancel()
         with contextlib.suppress(asyncio.CancelledError):
             await typing_task
+
+    answer = f"{answer}{_FOLLOWUP_POSTFIX}"
 
     await storage.append_history(uid, "user", question)
     await storage.append_history(uid, "assistant", answer)
