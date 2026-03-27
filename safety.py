@@ -179,6 +179,19 @@ def _default_incidents_root() -> dict[str, Any]:
     return {"incidents": []}
 
 
+def _normalize_incidents_root(raw: Any) -> dict[str, Any]:
+    """Accept legacy/broken formats and coerce to {'incidents': [...]}."""
+    if isinstance(raw, dict):
+        incidents = raw.get("incidents", [])
+        if isinstance(incidents, list):
+            return {"incidents": incidents}
+        return _default_incidents_root()
+    if isinstance(raw, list):
+        # Legacy format: file root is a bare list of incidents.
+        return {"incidents": raw}
+    return _default_incidents_root()
+
+
 def _read_incidents_locked() -> dict[str, Any]:
     INCIDENTS_PATH.parent.mkdir(parents=True, exist_ok=True)
     if not INCIDENTS_PATH.is_file():
@@ -191,7 +204,8 @@ def _read_incidents_locked() -> dict[str, Any]:
 
     with FileLock(INCIDENTS_LOCK_PATH):
         with open(INCIDENTS_PATH, encoding="utf-8") as fh:
-            return json.load(fh)
+            raw = json.load(fh)
+        return _normalize_incidents_root(raw)
 
 
 def _write_incidents_locked(root: dict[str, Any]) -> None:
@@ -228,7 +242,7 @@ async def log_safety_incident(
     }
 
     def _append() -> None:
-        root = _read_incidents_locked()
+        root = _normalize_incidents_root(_read_incidents_locked())
         incidents: list[dict[str, Any]] = root.setdefault("incidents", [])
         incidents.append(entry)
         root["incidents"] = incidents

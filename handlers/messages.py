@@ -61,6 +61,43 @@ _CLARIFICATION_FALLBACK_QUESTIONS: list[str] = [
     "Какая поддержка у вас сейчас есть (люди, занятия, привычки), и что вы уже пробовали, чтобы справиться?",
 ]
 
+_CLARIFICATION_PROMPT_TEMPLATE = (
+    "Ты проводишь первичную психологическую консультацию.\n"
+    "Клиент описал следующее:\n"
+    "- Симптомы: {symptoms}\n"
+    "- Контекст: {life_context}\n\n"
+    "Перед тем как дать оценку, тебе нужно задать от 3 до 5 уточняющих вопросов.\n\n"
+    "Логика выбора количества:\n"
+    "- 3 вопроса: если картина достаточно ясна, человек уже многое рассказал\n"
+    "- 4-5 вопросов: если описание скудное, расплывчатое, или явно хроническая ситуация\n\n"
+    "Каждый вопрос должен раскрывать НОВЫЙ аспект. Обязательно охвати хотя бы:\n"
+    "1. Временной аспект (когда началось, как менялось)\n"
+    "2. Интенсивность и телесные проявления\n"
+    "3. Социальный ресурс (есть ли кто-то рядом)\n\n"
+    "По возможности также:\n"
+    "4. Триггеры или паттерны (что усиливает / что облегчает)\n"
+    "5. Что уже пробовал человек самостоятельно\n\n"
+    "НЕ спрашивай о том, что уже явно упомянуто.\n"
+    "НЕ задавай закрытые вопросы (да/нет).\n"
+    "Тон — тёплый, заботливый, как опытный психолог на первой сессии.\n\n"
+    "Верни ТОЛЬКО JSON-массив строк. Никакого текста до или после."
+)
+
+_EVALUATION_IMPORTANT_PREFIX = (
+    "ВАЖНО: В ходе диалога клиент ответил на уточняющие вопросы — их ответы "
+    "есть в истории беседы выше. Обязательно учти их в оценке. "
+    "Ссылайся на конкретные слова клиента — это создаёт ощущение "
+    "что его действительно услышали."
+)
+
+_FOLLOWUP_PROMPT_TEMPLATE = (
+    "Клиент задаёт дополнительный вопрос после получения оценки: \"{question}\"\n\n"
+    "Отвечай в контексте всей беседы. Если вопрос касается рекомендаций — "
+    "развёрни их применительно к конкретной ситуации клиента, "
+    "не давай общих советов. Если чувствуешь тревогу или растерянность "
+    "в вопросе — сначала отзеркаль это, потом отвечай по существу."
+)
+
 _LLM_ERROR_FALLBACK = (
     "К сожалению, не удалось выполнить автоматическую оценку. "
     "Рекомендуем обратиться за очной консультацией к специалисту "
@@ -89,6 +126,9 @@ _FOLLOWUP_SYSTEM_PROMPT_FALLBACK = (
 # - Отвечай развёрнуто: минимум 3-4 абзаца на оценку, минимум 2-3 предложения на каждый пункт рекомендаций
 # - Структурируй ответ: предварительная оценка → на что обратить внимание → к кому обратиться → общие рекомендации
 # - Используй живой, человечный язык — не сухой медицинский
+# - Когда человек ответил на уточняющие вопросы, обязательно ссылайся на его ответы в оценке — это показывает что ты действительно слушала (например: "Вы упомянули, что это началось год назад после развода — это важный момент...")
+# - Начинай итоговую оценку с короткого резюме того, что услышала ("Если я правильно понимаю вашу ситуацию...") — это создаёт доверие
+# - В рекомендациях учитывай контекст поддержки: если человек одинок — делай акцент на профессиональной помощи; если есть поддержка — задействуй её в рекомендациях
 # - Всегда добавляй дисклеймер: "Это не медицинская консультация. Обратитесь к специалисту."
 # - Если упоминаются суицидальные мысли — немедленно направляй на горячую линию 8-800-2000-122
 # - Отвечай только на русском языке
@@ -141,14 +181,20 @@ async def _generate_clarification_questions(
     record = await storage.get_user_record(user_id)
     collected = record.get("collected_data", {})
     history = record.get("history", [])
+    symptoms = (
+        str(collected.get("symptoms", "") or "не указано")
+        if isinstance(collected, dict)
+        else "не указано"
+    )
+    life_context = (
+        str(collected.get("life_context", "") or "не указано")
+        if isinstance(collected, dict)
+        else "не указано"
+    )
 
-    current_user_content = (
-        "Сформулируй 3–5 уточняющих вопросов для клиента на основе уже собранных симптомов и контекста. "
-        "Вопросы должны быть открытыми (не да/нет), тёплыми, без клинического тона и без повторов того, "
-        "что уже явно сказано. Старайся охватить разные аспекты: давность, интенсивность, триггеры, "
-        "социальную поддержку, и что уже пробовали, чтобы справиться. "
-        "Верни ответ ОДНИМ JSON-массивом строк без текста до/после, без Markdown.\n\n"
-        "Пример: [\"Вопрос 1...\", \"Вопрос 2...\"]"
+    current_user_content = _CLARIFICATION_PROMPT_TEMPLATE.format(
+        symptoms=symptoms,
+        life_context=life_context,
     )
 
     messages = build_evaluation_chat_messages(
@@ -192,6 +238,8 @@ async def _run_evaluation(openrouter_client: OpenRouterClient, user_id: int) -> 
 
     current_user_content = (
         evaluation_json_user_instruction()
+        + "\n\n"
+        + _EVALUATION_IMPORTANT_PREFIX
         + "\n\nНа основе собранных данных и истории диалога "
         "дай предварительную оценку и рекомендации. "
         "Не ставь диагноз. Укажи, к каким специалистам обратиться. "
@@ -256,9 +304,10 @@ async def on_context(
         keep_typing(message.bot, message.chat.id),
         name=f"keep_typing:{message.chat.id}",
     )
+    thinking_msg: Message | None = None
 
     try:
-        await message.answer(_CLARIFICATION_THINKING)
+        thinking_msg = await message.answer(_CLARIFICATION_THINKING)
         questions = await _generate_clarification_questions(openrouter_client, uid)
     except OpenRouterError:
         logger.exception("LLM clarification generation failed for user %d", uid)
@@ -270,6 +319,9 @@ async def on_context(
         typing_task.cancel()
         with contextlib.suppress(asyncio.CancelledError):
             await typing_task
+        if thinking_msg is not None:
+            with contextlib.suppress(Exception):
+                await thinking_msg.delete()
 
     await storage.init_clarification(uid, questions)
     await state.set_state(DiagnosticStates.clarification)
@@ -381,7 +433,7 @@ async def on_followup_question(
         else _FOLLOWUP_SYSTEM_PROMPT_FALLBACK
     )
 
-    current_user_content = question
+    current_user_content = _FOLLOWUP_PROMPT_TEMPLATE.format(question=question)
 
     messages = build_evaluation_chat_messages(
         system_prompt=followup_system_prompt,

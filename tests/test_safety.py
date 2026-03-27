@@ -68,5 +68,28 @@ async def test_log_safety_incident_skips_non_critical(tmp_path, monkeypatch: pyt
     assert not path.is_file()
 
 
+@pytest.mark.asyncio
+async def test_log_safety_incident_accepts_legacy_list_root(
+    tmp_path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(safety, "INCIDENTS_PATH", tmp_path / "incidents.json")
+    monkeypatch.setattr(safety, "INCIDENTS_LOCK_PATH", tmp_path / "incidents.json.lock")
+    (tmp_path / "incidents.json").write_text("[]", encoding="utf-8")
+
+    result = safety.SafetyCheckResult(
+        is_critical=True,
+        category="suicide_self_harm",
+        rule_id="ru_suicide",
+    )
+    await safety.log_safety_incident(17, result, "хочу умереть")
+
+    payload = json.loads((tmp_path / "incidents.json").read_text(encoding="utf-8"))
+    assert isinstance(payload, dict)
+    assert "incidents" in payload
+    assert len(payload["incidents"]) == 1
+    assert payload["incidents"][0]["user_id"] == 17
+
+
 def test_normalize_for_matching() -> None:
     assert safety.normalize_for_matching("  A\nB\tc ") == "a b c"
